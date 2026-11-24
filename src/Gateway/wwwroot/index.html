@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strangler migration</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #1d2430; background: #f4f6f9; }
+    body { margin: 0; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 1.5rem; }
+    p.lead { margin: 0 0 20px; color: #4a5568; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); margin-bottom: 16px; overflow-x: auto; }
+    h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e5e9f0; white-space: nowrap; vertical-align: middle; }
+    .modes button { font: inherit; font-size: 0.82rem; padding: 4px 9px; margin-right: 4px; border-radius: 6px; border: 1px solid #2b5fd9; background: #fff; color: #2b5fd9; cursor: pointer; }
+    .modes button.active { background: #2b5fd9; color: #fff; }
+    .modes button:disabled { opacity: 0.35; cursor: not-allowed; }
+    input[type=number] { width: 4.5em; font: inherit; padding: 3px 6px; border: 1px solid #cbd2dc; border-radius: 6px; }
+    .bad { color: #c53030; font-weight: 600; }
+    .good { color: #1f7a3f; font-weight: 600; }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 0.85em; }
+    .note { color: #4a5568; font-size: 0.85rem; }
+    #error { color: #c53030; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Strangler migration</h1>
+  <p class="lead">Each proxied route moves <strong>Legacy → Shadow → Canary → Modern</strong> without a deploy. Shadow serves the legacy answer
+    and compares it with the modern one in the background. Try the API in <a href="/scalar">Scalar</a>, or <code>GET /api/orders</code>, and watch this page.</p>
+  <p id="error"></p>
+
+  <section class="card">
+    <h2>Routes</h2>
+    <table>
+      <thead><tr><th>Route</th><th>Mode</th><th>Canary %</th><th>Served legacy / modern</th><th>Shadow compared</th><th>Mismatches</th></tr></thead>
+      <tbody id="routes"></tbody>
+    </table>
+    <p class="note">Write routes cannot be shadowed (they would run twice); routes the modern service does not implement stay on Legacy.</p>
+  </section>
+
+  <section class="card">
+    <h2>Latest shadow mismatches</h2>
+    <table>
+      <thead><tr><th>When</th><th>Request</th><th>Field</th><th>Legacy</th><th>Modern</th></tr></thead>
+      <tbody id="mismatches"></tbody>
+    </table>
+  </section>
+</main>
+<script>
+  const modes = ['Legacy', 'Shadow', 'Canary', 'Modern']
+  const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e }
+
+  function allowed(route, mode) {
+    if (mode === 'Legacy') return true
+    if (!route.modernReady) return false
+    return !(mode === 'Shadow' && !route.readOnly)
+  }
+
+  async function change(routeId, mode, canaryPercent) {
+    const res = await fetch(`/migration/api/routes/${routeId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, canaryPercent }),
+    })
+    document.getElementById('error').textContent = res.ok ? '' : (await res.json()).detail ?? 'Change refused.'
+    await load()
+  }
+
+  function renderRoutes(routes) {
+    const body = document.getElementById('routes')
+    body.replaceChildren(...routes.map(r => {
+      const tr = el('tr')
+      tr.append(el('td', r.routeId))
+      const modeCell = el('td', undefined, 'modes')
+      const percent = el('input'); percent.type = 'number'; percent.min = 0; percent.max = 100; percent.value = r.mode === 'Canary' ? r.canaryPercent : 10
+      for (const m of modes) {
+        const b = el('button', m, r.mode === m ? 'active' : '')
+        b.disabled = !allowed(r, m)
+        b.onclick = () => change(r.routeId, m, Number(percent.value))
+        modeCell.append(b)
+      }
+      tr.append(modeCell)
+      const percentCell = el('td'); percentCell.append(percent); tr.append(percentCell)
+      const c = r.counters
+      tr.append(el('td', `${c.servedByLegacy} / ${c.servedByModern}`))
+      tr.append(el('td', String(c.shadowCompared)))
+      tr.append(el('td', String(c.shadowMismatches), c.shadowMismatches > 0 ? 'bad' : (c.shadowCompared > 0 ? 'good' : '')))
+      return tr
+    }))
+  }
+
+  function renderMismatches(list) {
+    const rows = list.slice(0, 30).flatMap(m => m.differences.map(d => {
+      const tr = el('tr')
+      tr.append(el('td', new Date(m.at).toLocaleTimeString()), el('td', `${m.routeId} ${m.path}`))
+      const field = el('td'); field.append(el('code', d.path)); tr.append(field)
+      tr.append(el('td', d.legacy ?? '—'), el('td', d.modern ?? '—'))
+      return tr
+    }))
+    document.getElementById('mismatches').replaceChildren(...rows)
+  }
+
+  async function load() {
+    try {
+      const [routes, mismatches] = await Promise.all([
+        fetch('/migration/api/routes').then(r => r.json()),
+        fetch('/migration/api/mismatches').then(r => r.json()),
+      ])
+      renderRoutes(routes)
+      renderMismatches(mismatches)
+    } catch (e) {
+      document.getElementById('error').textContent = `Could not load the migration state: ${e}`
+    }
+  }
+
+  load()
+  setInterval(load, 3000)
+</script>
+</body>
+</html>
