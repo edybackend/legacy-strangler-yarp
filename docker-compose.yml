@@ -1,0 +1,37 @@
+name: legacy-strangler-yarp
+
+services:
+  gateway:
+    build:
+      context: .
+      args: { PROJECT: Gateway }
+    image: legacy-strangler-yarp/gateway:local
+    environment:
+      ReverseProxy__Clusters__shop__Destinations__legacy__Address: http://legacy:8080/
+      ReverseProxy__Clusters__shop__Destinations__modern__Address: http://modern:8080/
+    ports:
+      - "8080:8080" # dashboard: http://localhost:8080 · API: http://localhost:8080/api/orders
+    depends_on: [legacy, modern]
+    restart: unless-stopped
+
+  legacy:
+    build:
+      context: .
+      args: { PROJECT: Legacy.Api }
+    image: legacy-strangler-yarp/legacy:local
+    volumes:
+      - shop-data:/app/data # owns the database
+    restart: unless-stopped
+
+  modern:
+    build:
+      context: .
+      args: { PROJECT: Modern.Api }
+    image: legacy-strangler-yarp/modern:local
+    volumes:
+      - shop-data:/app/data # reads the same file, read-only, during the migration
+    depends_on: [legacy]
+    restart: unless-stopped
+
+volumes:
+  shop-data:
