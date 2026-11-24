@@ -13,8 +13,6 @@ No modo **Shadow**, o gateway responde com o legado e repete a requisição no s
 JSON. Essa comparação achou um bug real: o legado calcula o total do pedido em `double` e trunca, então 4 de 8 pedidos
 ficavam um centavo abaixo (`1299,00 × 0,9 = 1169,0999…` virava `1169,09`).
 
-Pequeno de propósito: dá para ler em uns 15 minutos e subir com um comando.
-
 ![Painel da migração: clientes em Modern, pedidos em Canary 25 %, escrita travada em Legacy e as diferenças do shadow em $.total](docs/migration.png)
 
 ## Como rodar
@@ -130,16 +128,9 @@ specs/           especificações (spec primeiro)
 - **O shadow dobra a carga de leitura** no serviço novo e no banco. Serve para uma janela de verificação, não para sempre.
 - **GETs em shadow precisam ser seguros.** Um GET do legado com efeito colateral (log de auditoria, contador) rodaria duas vezes no lado novo, se ele também tivesse esse efeito.
 
-## Engenharia assistida por IA
+## Trabalhando com um agente de IA
 
-Este projeto foi construído com o Claude Code sob controles explícitos de engenharia:
-
-- **Regras do projeto** ([`CLAUDE.md`](CLAUDE.md)) definem as regras da migração que o agente segue.
-- **Hooks** ([`.claude/settings.json`](.claude/settings.json)) formatam cada mudança, bloqueiam edição de segredos e bancos, **bloqueiam mudanças no legado congelado**, **bloqueiam SQL de escrita no serviço novo** e rodam build e testes antes de a tarefa ser dada como pronta.
-- **Spec primeiro**: cada funcionalidade começa como especificação em [`specs/`](specs), com critérios de aceite.
-- **Os mesmos portões de qualidade para cada linha**: o CI exige zero avisos, formatação, testes de unidade/integração/paridade/arquitetura, uma migração com três contêineres e varredura de segredos.
-
-A arquitetura é minha, e eu reviso cada mudança.
+Durante a migração o legado fica congelado e o serviço novo só lê o banco antigo. As duas regras são impostas por hooks em [`.claude/`](.claude) quando trabalho com um agente de IA: edições em `Legacy.Api` são recusadas, assim como qualquer SQL de escrita em `Modern.Api`. O [`CLAUDE.md`](CLAUDE.md) descreve os passos da migração.
 
 ## Licença
 

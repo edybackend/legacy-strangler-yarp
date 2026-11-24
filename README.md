@@ -13,8 +13,6 @@ In **Shadow** mode the gateway answers from the legacy service and replays the r
 background, comparing the JSON. That comparison found a real bug: the legacy service computes order totals with `double`
 and truncates, so 4 of 8 orders were a cent short (`1299.00 × 0.9 = 1169.0999…` became `1169.09`).
 
-Small on purpose: it can be read in about 15 minutes and started with one command.
-
 ![Migration dashboard: customers on Modern, orders on Canary 25 %, writes locked on Legacy, and the shadow mismatches on $.total](docs/migration.png)
 
 ## Quick start
@@ -130,16 +128,9 @@ specs/           feature specs (spec-first workflow)
 - **Shadow doubles read load** on the modern service and on the database. It is meant for a verification window, not forever.
 - **Shadowed GETs must be safe.** A legacy GET with side effects (an audit log, a counter) would run twice on the modern side if it also had them.
 
-## AI-Assisted Engineering
+## Working with an AI agent
 
-This project was built with Claude Code under explicit engineering controls:
-
-- **Project rules** ([`CLAUDE.md`](CLAUDE.md)) define the migration rules the agent must follow.
-- **Hooks** ([`.claude/settings.json`](.claude/settings.json)) format every change, block edits to secrets and databases, **block changes to the frozen legacy service**, **block SQL writes in the modern service**, and run the build and tests before a task is considered done.
-- **Spec-first**: each feature starts as a spec in [`specs/`](specs) with acceptance criteria.
-- **Same quality gates for every line**: CI enforces warnings as errors, formatting, unit/integration/parity/architecture tests, a three-container migration run and secret scanning.
-
-I own the architecture and review every change.
+During a migration the legacy service is frozen and the new one only reads the old database. Both rules are enforced by hooks in [`.claude/`](.claude) when I work with an AI agent: edits to `Legacy.Api` are refused, and so is any SQL write in `Modern.Api`. [`CLAUDE.md`](CLAUDE.md) describes the migration steps.
 
 ## License
 
