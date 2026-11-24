@@ -1,0 +1,52 @@
+### Strangler migration — try it from VS Code (REST Client) or Rider/Visual Studio.
+### Run it first: `docker compose up --build`. Dashboard: http://localhost:8080
+@gateway = http://localhost:8080
+
+### 1. Customers are already migrated → X-Served-By: modern
+GET {{gateway}}/api/customers/1
+
+### 2. Orders are in Shadow → X-Served-By: legacy, compared in the background
+GET {{gateway}}/api/orders/2
+
+###
+GET {{gateway}}/api/orders
+
+### 3. What shadow traffic found (the legacy total truncates a cent)
+GET {{gateway}}/migration/api/mismatches
+
+### 4. Every route, its mode and counters
+GET {{gateway}}/migration/api/routes
+
+### 5. Canary: 30 % of order reads go to the modern service
+PUT {{gateway}}/migration/api/routes/orders-read
+Content-Type: application/json
+
+{ "mode": "Canary", "canaryPercent": 30 }
+
+### 6. A canary key keeps one customer on the same side
+GET {{gateway}}/api/orders/1
+X-Canary-Key: customer-42
+
+### 7. Writes cannot be shadowed → 409
+PUT {{gateway}}/migration/api/routes/orders-write
+Content-Type: application/json
+
+{ "mode": "Shadow", "canaryPercent": 0 }
+
+### 8. A write still goes to the legacy service…
+POST {{gateway}}/api/orders
+Content-Type: application/json
+
+{ "customerId": 2, "items": [{ "product": "Pen", "quantity": 3, "unitPrice": 2.50, "discountPercent": 0 }] }
+
+### 9. …and the modern read sees it (shared database, read-only)
+PUT {{gateway}}/migration/api/routes/orders-read
+Content-Type: application/json
+
+{ "mode": "Modern", "canaryPercent": 0 }
+
+### 10. Roll back
+PUT {{gateway}}/migration/api/routes/orders-read
+Content-Type: application/json
+
+{ "mode": "Legacy", "canaryPercent": 0 }
